@@ -9,3 +9,11 @@ While, the impact of boy preference has been extensively studied in population a
 ### author's contact
 
 email: nguyen_h6@denison.edu
+
+### Prerequisites
+
+The project will be run entirely in R 4.2.1. Dataset would be saved in local decive as excel or csv file. 
+
+### Data
+
+All data that is used in this project are public and is taken from General Statistical Office of Vietnam, the IMF, and the World Bank. 
