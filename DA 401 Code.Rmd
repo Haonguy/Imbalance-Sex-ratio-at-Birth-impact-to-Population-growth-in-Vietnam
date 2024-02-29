@@ -1,0 +1,132 @@
+---
+title: "DA 401 Project"
+author: "Hao Nguyen"
+date: "2024-02-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Set Directory
+setwd("C:/Users/nthao/OneDrive/Desktop/DA 401 Project")
+
+# Relevant libraries
+library(readr)
+library(dplyr)
+library(tidyverse)
+library(readxl)
+
+
+```
+
+Import the datasets
+
+```{r}
+# Vietnam Population Data decomposed by Ages. 
+Population_Data_by_Age <- read_csv("C:/Users/nthao/OneDrive/Desktop/DA 401 Project/Datasets/Population Data by Age.csv")
+
+# Vietnam General Population dataset
+General_Population_Data <- read_csv("Datasets/General Population Data.csv")
+
+# Composite Indices dataset
+Composite_indices <- read_csv("Datasets/Composite indices.csv")
+
+## Corresponding Composite Indices metadata
+Composite_indices_metadata <- read_excel("Datasets/Composite indices metadata.xlsx")
+
+# Unemployment rate dataset.  
+unemployment_rate <- read_excel("C:/Users/nthao/OneDrive/Desktop/DA 401 Project/Datasets/imf-dm-export-20240216 (2).xls")
+
+# GDP PPP per capita, international dollar dataset.
+GDP_PPP_capita <- read_excel("C:/Users/nthao/OneDrive/Desktop/DA 401 Project/Datasets/imf-dm-export-20240216.xls")
+
+# Contraceptive dataset. 
+Contraceptive <- read_excel("C:/Users/nthao/OneDrive/Desktop/DA 401 Project/Datasets/API_SP.DYN.CONM.ZS_DS2_en_excel_v2_3785.xls", 
+    skip = 3)
+
+```
+
+Clean the datasets
+
+```{r}
+# Clean Population_Data_by_Age dataset: remove the Total row of each year (as we could compute this ourself)
+Population_Data_by_Age <- Population_Data_by_Age %>% 
+  subset(GROUP != "TOTAL")
+
+# Clean Vietnam General Population dataset: remove the 1st & 2nd columns ("Name" & "Region") and remove rows with all NA values. 
+General_Population_Data <- General_Population_Data %>% 
+  subset(select = -c(Name, Region)) %>% 
+  filter(!is.na(GENC))
+
+# Clean Vietnam General Population dataset: change "--" (unknown value) into NA. 
+General_Population_Data[General_Population_Data == "--"] <- NA
+
+# Clean Composite Indices metadata: remove rows with NA values and remove the year column. 
+Composite_indices_metadata <- Composite_indices_metadata %>% 
+  na.omit() %>% 
+  subset(select = -c(`Time series`))
+
+# Clean Composite Indices dataset: melt the column names into different variables showing different indecies and years, then replace the short names of the indecies into their definitions from the meta data. We only take the data for Vietnam
+Composite_indices <- Composite_indices %>% 
+  ### change the last "_" into "__" of column names that have such feature. 
+  rename_with(~ gsub("_(?!.*_)", "__", ., perl = TRUE)) %>% 
+  ### melt columns into 2 variables: index and years using "__" as seperator within the innitial column name.
+  pivot_longer(
+    cols = -c(iso3, country, hdicode, region), 
+    names_to = c("index", "year"), 
+    names_sep = "__"
+  ) %>% 
+  ### join the dataset with the metadata to define the index.
+  left_join(Composite_indices_metadata, by = c("index" = "Short name")) %>%
+  select(-index) %>% 
+  ### rearrange columns for visualization. 
+  select(iso3, country, region, hdicode, `Full name`, year, value) %>% 
+  ### select vietnam data only. 
+  filter(iso3 == "VNM")
+
+# Clean Unemployment rate dataset: convert all "no data" values into NA, remove all rows that have full NA values, remove columns that have full NA values. 
+unemployment_rate[unemployment_rate == "no data"] <- NA # Change all "no data" values into NA. 
+
+unemployment_rate <- unemployment_rate %>% 
+  select(-1) %>% 
+  filter(rowSums(is.na(.)) != ncol(.)) %>%   # Remove rows with all NAs
+  t() %>% 
+  na.omit()  # Remove after transposed rows with all NAs. 
+
+### Rename column
+colnames(unemployment_rate)[1] <- "Unemployment Rate"
+
+# Clean GDP PPP per capita, international dollar dataset: convert all "no data" values into NA, remove all rows that have full NA values, remove columns that have full NA values, and transpose the dataset. 
+GDP_PPP_capita[GDP_PPP_capita == "no data"] <- NA # Change all "no data" values into NA. 
+
+GDP_PPP_capita <- GDP_PPP_capita %>% 
+  select(-1) %>% 
+  filter(rowSums(is.na(.)) != ncol(.)) %>%   # Remove rows with all NAs
+  t() %>% 
+  na.omit()  # Remove after transposed rows with all NAs. 
+
+### Rename column
+colnames(GDP_PPP_capita)[1] <- "GDP PPP per capita, international dollar"
+
+# Clean Contraceptive dataset: remove irrelevant columns, and melt the dataset. 
+Contraceptive <- Contraceptive %>% 
+  select(-`Indicator Code`) %>% 
+    pivot_longer(
+    cols = -c(1:3), 
+    names_to = c("Year"), 
+    values_to = Contraceptive$`Indicator Name`[1]
+  ) %>% 
+  select(-`Indicator Name`)
+
+names(General_Population_Data)
+
+```
+Remove specific datasets from the environment
+
+```{r}
+# remove composite indices metadata (as already incorporated into main dataset)
+rm(Composite_indices_metadata)
+```
+
+
