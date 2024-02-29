@@ -18,4 +18,5 @@ Required R packages: readr, dplyr, tidyverse, readxl (more would be added until 
 
 ### Data
 
-All data that is used in this project are public and is taken from General Statistical Office of Vietnam, the IMF, and the World Bank. 
+Data is taken from the US Census Bureau, the International Monetary Fund (IMF), the Worldbank, the United Nations (UN). More specifically, we concern ourself with: 
+
