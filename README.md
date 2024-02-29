@@ -1,4 +1,4 @@
-## Imbalance Sex ratio at Birth impact to Population growth in Vietnam
+## Imbalance Sex ratio at Birth impact to Population growth in Vietnam (Working Paper)
 
 ### Author
 
@@ -12,7 +12,9 @@ While, the impact of male birth preference has been extensively studied in popul
 
 ### Prerequisites
 
-The project will be run entirely in R 4.2.1. Dataset would be saved in local decive as excel or csv file. 
+The project will be run entirely in R 4.2.1. 
+
+Required R packages: readr, dplyr, tidyverse, readxl (more would be added until the project is finished)
 
 ### Data
 
