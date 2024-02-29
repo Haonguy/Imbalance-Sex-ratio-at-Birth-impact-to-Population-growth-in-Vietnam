@@ -6,7 +6,7 @@ This project dives into the impact of imbalance sex ratio at birth to population
 
 While, the impact of boy preference has been extensively studied in population and economics literature, this project is the first quantitative study that focused specifically on the impact of imbalance sex ratio at birth in Vietnam toward population growth. We hope that the results of the project would support policy makers in Vietnamese government in further improve and consider their population control policies. 
 
-### author's contact
+### Author's contact
 
 email: nguyen_h6@denison.edu
 
