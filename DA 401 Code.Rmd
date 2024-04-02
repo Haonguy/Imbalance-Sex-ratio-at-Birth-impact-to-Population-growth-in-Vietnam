@@ -1,0 +1,681 @@
+---
+title: "DA 401 Project"
+author: "Hao Nguyen"
+date: "2024-02-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+# Set Directory
+setwd("C:/Users/nthao/OneDrive/Desktop/DA 401 Project")
+
+# Relevant libraries
+library(readr)
+library(dplyr)
+library(tidyverse)
+library(readxl)
+library(plotly)
+library(gganimate)
+library(DT)
+library(scales)
+library(tseries)
+library(lmtest)
+library(forecast)
+library(modelsummary)
+library(zoo)
+
+
+```
+
+In this analysis, we will attempt to model and isolate the effect of sex ratio at birth in Vietnam's impact to population change. To begin with, we import the dataset from our local device. 
+
+```{r}
+# Vietnam Population Data decomposed by Ages. 
+Population_Data_by_Age <- read_csv("C:/Users/nthao/OneDrive/Desktop/DA 401 Project/Datasets/Population Data by Age.csv")
+
+# Vietnam General Population dataset
+General_Population_Data <- read_csv("Datasets/General Population Data.csv")
+
+# Composite Indices dataset
+Composite_indices <- read_csv("Datasets/Composite indices.csv")
+
+## Corresponding Composite Indices metadata
+Composite_indices_metadata <- read_excel("Datasets/Composite indices metadata.xlsx")
+
+# Unemployment rate dataset.  
+unemployment_rate <- read_excel("C:/Users/nthao/OneDrive/Desktop/DA 401 Project/Datasets/imf-dm-export-20240216 (2).xls")
+
+# GDP PPP per capita, international dollar dataset.
+GDP_PPP_capita <- read_excel("C:/Users/nthao/OneDrive/Desktop/DA 401 Project/Datasets/imf-dm-export-20240216.xls")
+
+# Contraceptive dataset. 
+Contraceptive <- read_excel("C:/Users/nthao/OneDrive/Desktop/DA 401 Project/Datasets/API_SP.DYN.CONM.ZS_DS2_en_excel_v2_3785.xls",
+    skip = 3)
+
+```
+
+We then proceed to execute initial data cleaning and wrangling. We note that because of the lack of contraceptive data from the World Bank of Vietnam, we use a data interpolation method. Specifically, this method fills initial and last missing values with the first and last available non-missing value respectively, and then employs linear interpolation to estimate and fill in the subsequent missing values based on the nearest known data points. 
+
+```{r}
+# Clean Contraceptive dataset: remove irrelevant columns, , melt the dataset, and interpolate the data. 
+Contraceptive <- Contraceptive %>%
+  select(-`Indicator Code`) %>%
+  pivot_longer(cols = -c(1:3), names_to = "Year", values_to = "value") %>%
+  select(-`Indicator Name`) %>%
+  mutate(Year = as.integer(Year)) %>%
+  filter(`Country Code` == "VNM") %>%
+  mutate(value = na.approx(value, na.rm = FALSE)) %>%
+  # Fill initial and final NA values
+  mutate(value = ifelse(is.na(value), 
+                        ifelse(row_number() <= which(!is.na(value))[1], 
+                               value[which(!is.na(value))[1]], 
+                               value[which(!is.na(value))[length(which(!is.na(value)))]]
+                        ), 
+                        value
+             )) %>%
+  # Rename the 'value' column back to its original name
+  rename(`Contraceptive prevalence, any modern method (% of married women ages 15-49)` = value)
+```
+
+We continue with data cleaning and wrangling for other datasets. Specifically, we remove the `TOTAL` rows in `Population_Data_by_Age` dataset as these observations consists of total population measurements which could be calculated using sum of all age groups. We continue with decompose the `Population_Data_by_Age` into age groups with interval of 4 years, except for age group `0` being the population of infant in such year. 
+
+```{r}
+# Clean Population_Data_by_Age dataset: remove the Total row of each year (as we could compute this ourself)
+Population_Data_by_Age <- Population_Data_by_Age %>% 
+  subset(GROUP != "TOTAL")
+
+# Reformatted Population_Data_by_Age: change into age group. 
+Population_Data_by_Age_formated <- Population_Data_by_Age %>% 
+  rename(Age = GROUP) %>% # change column name 
+  mutate(Age = as.numeric(Age)) %>% # change data type
+  # re-organize into age groups
+  mutate(Age_Group = case_when( 
+    Age == 0 ~ "0",
+    Age >= 1 & Age <= 4 ~ "1-4",
+    Age >= 5 & Age <= 9 ~ "5-9",
+    Age >= 10 & Age <= 14 ~ "10-14",
+    Age >= 15 & Age <= 19 ~ "15-19",
+    Age >= 20 & Age <= 24 ~ "20-24",
+    Age >= 25 & Age <= 29 ~ "25-29",
+    Age >= 30 & Age <= 34 ~ "30-34",
+    Age >= 35 & Age <= 39 ~ "35-39",
+    Age >= 40 & Age <= 44 ~ "40-44",
+    Age >= 45 & Age <= 49 ~ "45-49",
+    Age >= 50 & Age <= 54 ~ "50-54",
+    Age >= 55 & Age <= 59 ~ "55-59",
+    Age >= 60 & Age <= 64 ~ "60-64",
+    Age >= 65 & Age <= 69 ~ "65-69",
+    Age >= 70 & Age <= 74 ~ "70-74",
+    Age >= 75 & Age <= 79 ~ "75-79",
+    Age >= 80 & Age <= 84 ~ "80-84",
+    Age >= 85 & Age <= 89 ~ "85-89",
+    Age >= 90 & Age <= 94 ~ "90-94",
+    Age >= 95 & Age <= 99 ~ "95-99",
+    is.na(Age) ~ "100+")) %>% 
+  # remove irrelevant columns
+  select(-c(GENC, `Country/Area Name`, Age)) %>% 
+  # group by and recalculate other columns
+  group_by(Year, Age_Group) %>% 
+  summarise(
+    Population = sum(Population, na.rm = TRUE),
+    `% of Population` = sum(`% of Population`, na.rm = TRUE),
+    `Male Population` = sum(`Male Population`, na.rm = TRUE),
+    `% of Males` = sum(`% of Males`, na.rm = TRUE),
+    `Female Population` = sum(`Female Population`, na.rm = TRUE),
+    `% of Females` = sum(`% of Females`, na.rm = TRUE)) %>% 
+  mutate(`Sex ratio of the population` = `Male Population`/`Female Population`) %>% 
+  # create a sort-key column 
+  mutate(sort_key = case_when( 
+    Age_Group == "0" ~ 0, 
+    Age_Group == "1-4" ~ 1, 
+    Age_Group == "5-9" ~ 5,
+    Age_Group == "10-14" ~ 10,
+    Age_Group == "15-19" ~ 15,
+    Age_Group == "20-24" ~ 20,
+    Age_Group == "25-29" ~ 25,
+    Age_Group == "30-34" ~ 30,
+    Age_Group == "35-39" ~ 35,
+    Age_Group == "40-44" ~ 40,
+    Age_Group == "45-49" ~ 45,
+    Age_Group == "50-54" ~ 50,
+    Age_Group == "55-59" ~ 55,
+    Age_Group == "60-64" ~ 60,
+    Age_Group == "65-69" ~ 65,
+    Age_Group == "70-74" ~ 70,
+    Age_Group == "75-79" ~ 75,
+    Age_Group == "80-84" ~ 80,
+    Age_Group == "85-89" ~ 85,
+    Age_Group == "90-94" ~ 90,
+    Age_Group == "95-99" ~ 95,
+    Age_Group == "100+" ~ 100)) %>% 
+  # sort based on group
+  arrange(sort_key) %>% 
+  # sort based on year
+  group_by(sort_key) %>%
+  arrange(Year) %>%
+  ungroup()
+```
+
+For Composite Indices metadata and Composite Indices datasets, we first remove non-essential columns within the metadata and rows with NA values. We continue with clean the Composite Indices dataset and melt the dataset into data tidy format. Lastly, we merge the metadata with the dataset in order to have a column showing the definitions of indices. 
+
+```{r}
+# Clean Composite Indices metadata: remove rows with NA values and remove the year column. 
+Composite_indices_metadata <- Composite_indices_metadata %>% 
+  na.omit() %>% 
+  subset(select = -c(`Time series`)) %>% 
+  # rearrange columns 
+  select(`Short name`, `Full name`)
+
+# Clean Composite Indices dataset: melt the column names into different variables showing different indecies and years, then replace the short names of the indecies into their definitions from the meta data. 
+Composite_indices <- Composite_indices %>% 
+  ### change the last "_" into "__" of column names that have such feature. 
+  rename_with(~ gsub("_(?!.*_)", "__", ., perl = TRUE)) %>% 
+  ### melt columns into 2 variables: index and years using "__" as separator within the initial column name.
+  pivot_longer(
+    cols = -c(iso3, country, hdicode, region), 
+    names_to = c("index", "year"), 
+    names_sep = "__"
+  ) %>% 
+  ### join the dataset with the metadata to define the index.
+  left_join(Composite_indices_metadata, by = c("index" = "Short name")) %>%
+  ### Select only relevant country 
+  filter(iso3 == "VNM") %>% 
+  ### rearrange columns for visualization. 
+  select(iso3, country, region, hdicode, index, `Full name`, year, value) %>% 
+  ### change year value into int
+  mutate(year = as.integer(year))
+
+```
+
+Further, we note from the UN documentation: https://hdr.undp.org/data-center/documentation-and-downloads and would use only 3 main indices: `Human Development Index (hdi)`, `Gender Development Index (gdi)`, and `Gender Inequality Index (gii)`. We chose to focus on these indices due to their comprehensive representation of human development, gender disparities, and gender inequality, respectively. These indices are also widely recognized and utilized in research and policy contexts, offering a standardized framework for assessing and comparing societal progress across countries and within countries at different periods. Thus: 
+
+```{r}
+# Filter picked indicies only
+Composite_indices <- Composite_indices %>% 
+  filter(index == "hdi" | index == "gdi" | index == "gii")
+```
+
+
+For the remaining datasets, we conduct basic data cleaning process, including: remove NAs, mutate into integers, rename columns etc. 
+
+```{r}
+# Clean Vietnam General Population dataset: remove the 1st & 2nd columns ("Name" & "Region") and remove rows with all NA values. 
+General_Population_Data <- General_Population_Data %>% 
+  subset(select = -c(Name, Region)) %>% 
+  filter(!is.na(GENC)) %>% 
+  # change all columns except the first column into int
+  mutate(across(-1, ~str_replace_all(., ",", ""))) %>%  # Remove commas
+  mutate(across(-1, ~str_trim(., side = "both"))) %>%   # Trim spaces
+  mutate(across(-1, as.numeric))                        # Convert to numeric 
+
+# Clean Vietnam General Population dataset: Remove years with NA values: only take data after 1989. 
+General_Population_Data <- General_Population_Data[complete.cases(General_Population_Data), ]
+
+# Clean Unemployment rate dataset: convert all "no data" values into NA, remove all rows that have full NA values, remove columns that have full NA values. 
+unemployment_rate[unemployment_rate == "no data"] <- NA # Change all "no data" values into NA. 
+
+unemployment_rate <- unemployment_rate %>% 
+  select(-1) %>% 
+  filter(rowSums(is.na(.)) != ncol(.)) %>%   # Remove rows with all NAs
+  t() %>% 
+  na.omit()  # Remove after transposed rows with all NAs. 
+
+### Rename column
+colnames(unemployment_rate)[1] <- "Unemployment Rate"
+
+# Clean GDP PPP per capita, international dollar dataset: convert all "no data" values into NA, remove all rows that have full NA values, remove columns that have full NA values, and transpose the dataset. 
+GDP_PPP_capita[GDP_PPP_capita == "no data"] <- NA # Change all "no data" values into NA. 
+
+GDP_PPP_capita <- GDP_PPP_capita %>% 
+  select(-1) %>% 
+  filter(rowSums(is.na(.)) != ncol(.)) %>%   # Remove rows with all NAs
+  t() %>% 
+  na.omit()  # Remove after transposed rows with all NAs. 
+
+### Rename column
+colnames(GDP_PPP_capita)[1] <- "GDP PPP per capita, international dollar"
+```
+
+We now combine all our datasets into 1 comprehensive dataset. Our main dataset would be of format that include columns: country code, year, and all independent and dependent variables. As such, we further modify current datasets. 
+
+```{r}
+# Pivot wider composite indices dataset to combine into main_df
+wide_composite_indices <- Composite_indices %>% 
+  # Remove full name and use short name
+  subset(select = -c(`Full name`)) %>% 
+  # pivot the dataset
+  pivot_wider(names_from = index, values_from = value) %>% 
+  # remove all NA values variables
+  select(where(~ all(complete.cases(.)))) %>% 
+  # arrange rows chronically
+  arrange(year) %>% 
+  # remove country name & identifier
+  subset(select = -c(iso3, country, region, hdicode))
+
+# Modified gdp_ppp_capita data to combine into main_df
+GDP_PPP_capita <- as.data.frame(GDP_PPP_capita)
+GDP_PPP_capita$year <- as.numeric(rownames(GDP_PPP_capita))
+rownames(GDP_PPP_capita) <- NULL
+
+# Modified unemployment_rate data to combine into main_df
+unemployment_rate <- as.data.frame(unemployment_rate)
+unemployment_rate$year <- as.numeric(rownames(unemployment_rate))
+rownames(unemployment_rate) <- NULL
+
+# main_df: comprehensive dataset
+main_df <- General_Population_Data %>% 
+  inner_join(wide_composite_indices, by = c("Year" = "year")) %>% 
+  inner_join(GDP_PPP_capita, c("Year" = "year")) %>% 
+  inner_join(unemployment_rate, c("Year" = "year")) %>% 
+  inner_join(subset(Contraceptive, select = -c(1,2)), c("Year" = "Year")) %>% 
+  # convert all columns except the country code column into numeric values 
+  mutate_at(vars(-1), as.numeric)
+
+# Since we no longer use `Composite_indices`, `GDP_PPP_capita`, and `unemployment_rate`, thus: 
+rm(Composite_indices)
+rm(GDP_PPP_capita)
+rm(unemployment_rate)
+rm(Contraceptive)
+```
+
+
+
+Summary Statistics: We perform summary statistics
+
+1. Comprehensive dataset: `main_df` 
+
+Regarding the `main_df` dataset, we create a correlation matrix between all dependent and independent variables to identify potential multicollinearity or relationships. 
+
+```{r}
+# Set a high threshold for heavily correlated matrix
+threshold <- 0.8
+
+# Matrix for heavily correlated variables
+corr_matrix_lar_filtered <- cor(main_df[,-c(1:3)]) %>%
+  # Replace values below threshold with NA
+  {
+    replace_mat <- .
+    replace_mat[-threshold < replace_mat & replace_mat < threshold] <- NA
+    replace_mat
+  } %>%
+  # Remove columns that contain only 1 and NA
+  {
+    cols_to_keep <- !apply(., 2, function(x) all(x[!is.na(x)] == 1))
+    .[, cols_to_keep]
+  } %>%
+  # Remove rows that contain only 1 and NA
+  {
+    rows_to_keep <- !apply(., 1, function(x) all(x[!is.na(x)] == 1))
+    .[rows_to_keep, ] 
+  } %>%
+  # Create correlation matrix
+  {
+    significant_vars <- apply(!is.na(.), 1, any)
+    corr_matrix_temp <- .[significant_vars, significant_vars]
+    diag(corr_matrix_temp) <- NA  # Exclude self-correlations
+    corr_matrix_temp
+  }
+
+# Create an interactive heatmap with the filtered matrix
+corr_matrix <- plot_ly(x = colnames(corr_matrix_lar_filtered), y = colnames(corr_matrix_lar_filtered), z = corr_matrix_lar_filtered, 
+                    type = "heatmap", colorscale = "Plasma", 
+                    zmin = -1, zmax = 1) %>%
+            layout(title = "Filtered Correlation Matrix (Absolute Corr >= 0.8)",
+                   xaxis = list(title = "Variables", tickangle = 45, tickfont = list(size = 10)),
+                   yaxis = list(title = "Variables", tickangle = -45, tickfont = list(size = 10)),
+                   margin = list(l = 100, r = 100, t = 100, b = 100))
+
+# Visualization
+corr_matrix
+
+# Remove unnecessary variable names from global environment 
+rm(threshold)
+rm(corr_matrix)
+
+names(main_df)
+```
+
+
+We see that marking the threshold for large correlated variables at absolute value of 0.8 shows large number of indices in the Composite_indices dataset being correlated with each other. We hypothesize that the large correlation stems from various variables within Composite_indices dataset of the UN belonging in the same group, thus, measuring similar social quantities. In addition, we recognize that some variables are calculated using similar metrics as other variables, which would further explain the large correlation. 
+
+For now, we plan to identify the variables that are created using metrics that are similar to other variables. However, further identification of these variables would be conducted in the future. 
+
+2. General Population Data 
+
+Population change is our main dependent variable, as such, we attempt to graph population levels and rate of change (%) over time. We notice that the dataset General_Population_Data includes past, current, and future projection of population data until 2100. We thus marks a dash line at 2024 to separate between real and projected data. 
+
+We proceed to graph out the historical and projection of the country population from 1989 till 2100. 
+
+```{r}
+# graph out the historical and projection population of the country. 
+ggplot(General_Population_Data, aes(x = Year)) +
+  geom_line(aes(y = Population, colour = "Population"), size = 1) +
+  geom_line(aes(y = `Annual Growth Rate %` * 100000000, colour = "Rate of Change"), size = 1) +
+  geom_vline(xintercept = 2024, linetype = "dashed", color = "black") + # Add dashed line at year 2024: years to the right being projection
+  scale_y_continuous(
+    name = "Total Population",
+    labels = function(x) format(x, scientific = FALSE),
+    sec.axis = sec_axis(~ (. / 100000000), name="Rate of Change (%)")
+  ) +
+  labs(colour = "Legend") +
+  theme_minimal()
+```
+
+We see that since 1989 till now, the population of Vietnam has been on an increasing trend. However, we also see that the population levels would peak around the 2050s. In term of the change in population levels, the population growth rate has been in declined rapidly since the beginning of available dataset (1989) from more than 2% to less than 0% annually in 60 years. We note however, that the chart only provides an overview of the population trends. 
+
+Thus, we further decompose the population by age group by creating a population pyramid over time. We convert the `Population_Data_by_Age` into an age structure pyramid. We first reorder the dataset into age groups of interval 5 except for age 0 (being bornt) and interval 1-4 years old then create the pyramid. 
+
+```{r}
+# Reshape data
+df_pyramid <- Population_Data_by_Age_formated %>% 
+  {
+    pop_age <-.
+    pop_age <- select(pop_age, Year, sort_key, Age_Group, `Male Population`, `Female Population`)
+    pop_age
+  } %>% 
+  pivot_longer(
+    cols = c("Male Population", "Female Population"),
+    names_to = "Gender",
+    values_to = "Population"
+  ) %>% 
+  # Negate female population for pyramid 
+  mutate(Gender = ifelse(Gender == "Male Population", "Male", "Female"),
+         Population = ifelse(Gender == "Female", -Population, Population)) 
+
+# Reshape data to have separate columns for Male and Female
+df_pyramid <- df_pyramid %>%
+  spread(key = Gender, value = Population) %>%
+  arrange(Year, sort_key)
+
+# Determine the range for setting symmetrical axis limits
+max_population <- ceiling(max(abs(c(df_pyramid$Male, df_pyramid$Female)), na.rm = TRUE) / 1000000) * 1000000
+tick_values <- seq(-max_population, max_population, by = 1000000)  # Each step is 1 million
+
+# Create the initial plot
+pop_pyramid <- plot_ly(df_pyramid, type = 'bar', orientation = 'h',
+               transforms = list(
+                 list(
+                   type = 'filter',
+                   target = ~Year,
+                   operation = '=',
+                   value = min(df_pyramid$Year)  # Start with the earliest year
+                 )
+               ))
+
+# Define colors for male and female
+male_color = 'rgba(255, 0, 0, 0.6)'  # Light red with less transparency
+female_color = 'rgba(0, 0, 255, 0.6)'  # Light blue with less transparency
+
+# Add traces for Male and Female with customized hoverinfo and without showing text on bars
+pop_pyramid <- pop_pyramid %>% add_trace(x = ~Male, y = ~Age_Group, name = 'Male', text = ~Male, hoverinfo = 'text+y', textposition = 'none', marker = list(color = male_color))
+pop_pyramid <- pop_pyramid %>% add_trace(x = ~Female, y = ~Age_Group, name = 'Female', text = ~abs(Female), hoverinfo = 'text+y', textposition = 'none', marker = list(color = female_color))
+
+# Layout adjustments
+pop_pyramid <- pop_pyramid %>% layout(
+  yaxis = list(title = 'Age Group'),
+  xaxis = list(
+    title = 'Population',
+    tickvals = tick_values,
+    ticktext = lapply(tick_values, function(x) ifelse(x == 0, "0", scales::comma(abs(x))))
+  ),
+  barmode = 'overlay',
+  title = 'Population Pyramid'
+)
+
+# Slider for year selection
+years <- sort(unique(df_pyramid$Year))
+slider_steps <- lapply(years, function(year) {
+  list(
+    method = "restyle",
+    args = list("transforms[0].value", as.character(year)),
+    label = as.character(year)
+  )
+})
+
+pop_pyramid <- pop_pyramid %>% layout(
+  sliders = list(
+    list(
+      active = 0,
+      currentvalue = list(prefix = "Year: "),
+      steps = slider_steps
+    )
+  )
+)
+
+# Print the plot
+pop_pyramid
+
+# Remove unnessasry variables
+rm(max_population)
+rm(tick_values)
+rm(male_color)
+rm(female_color)
+rm(pop_pyramid)
+rm(slider_steps)
+
+```
+
+
+From the population pyramid over time, we can clearly see a generation less than 30 years old in 1989 created a large bump in the population pyramid. This generation is likely to drive population growth in the year ahead as they were heading into prime age to establish a family. In addition, we also saw that the number of children being bornt (age 0) decline over time. Thus, signaling declining fertility being the main drivers of population reduction in the long term. Still, we note the fact that in each age group the large increase in population levels does not have a corresponding dramatic reduction. This is likely due to advancement in adopting modern healthcare system, thus, keeping more people living at the same time and keeps the age group wide for longer. 
+
+Most importantly, we notice further from the pyramid that there are differences between the number of males and females at every age group with initially male outnumbers female individuals then the trends reversed with increase age groups. As such, we visualize the difference between number of male and female at birth and at each age group. 
+
+```{r}
+# Creating an ordered factor for Age_Group
+age_group_levels <- c("0", "1-4", "5-9", "10-14", "15-19", "20-24", "25-29", "30-34", "35-39", "40-44", "45-49", "50-54", "55-59", "60-64", "65-69", "70-74", "75-79", "80-84", "85-89", "90-94", "95-99", "100+")
+df_pyramid$Age_Group <- factor(df_pyramid$Age_Group, levels = age_group_levels, ordered = TRUE)
+
+# Calculate the difference between male and female populations
+df_difference <- df_pyramid %>%
+  mutate(Difference = Male + Female) %>%
+  arrange(Year, Age_Group)
+
+# Define colors
+male_color = 'rgba(255, 0, 0, 0.6)'
+female_color = 'rgba(0, 0, 255, 0.6)'
+
+# Determine the range for the axis limits (based on the maximum absolute difference)
+max_diff <- ceiling(max(abs(df_difference$Difference), na.rm = TRUE) / 1e5) * 1e5
+tick_values_diff <- seq(-max_diff, max_diff, by = 1e5)  # Each step is 100,000
+
+# Create the interactive plot with conditional colors
+pop_pyramid_diff <- plot_ly(data = df_difference, x = ~Difference, y = ~Age_Group, type = 'bar', orientation = 'h',
+               name = 'Difference', text = ~Difference, hoverinfo = 'text+y', textposition = 'none',
+               marker = list(color = ifelse(df_difference$Difference > 0, male_color, female_color)),
+               transforms = list(
+                 list(
+                   type = 'filter',
+                   target = ~Year,
+                   operation = '=',
+                   value = min(df_difference$Year)
+                 )
+               )) %>%
+  layout(
+    yaxis = list(title = 'Age Group'),
+    xaxis = list(
+      title = 'Population Difference (red: male exceed; blue: female exceed)',
+      zeroline = TRUE,
+      tickvals = tick_values_diff,
+      ticktext = lapply(tick_values_diff, function(x) scales::comma(abs(x))),
+      showgrid = TRUE  # Display grid lines
+    ),
+    barmode = 'overlay',
+    title = 'Male or Female Population Differences by Age Group',
+    sliders = list(
+      list(
+        active = 0,
+        currentvalue = list(prefix = "Year: "),
+        steps = lapply(sort(unique(df_difference$Year)), function(year) {
+          list(method = "restyle", args = list("transforms[0].value", as.character(year)), label = as.character(year))
+        })
+      )
+    )
+  )
+
+# Display the plot
+pop_pyramid_diff
+
+# Remove unnecessary datasets or variables
+rm(male_color)
+rm(female_color)
+rm(max_diff)
+rm(tick_values_diff)
+rm(df_difference)
+rm(df_pyramid)
+rm(age_group_levels)
+rm(pop_pyramid_diff)
+```
+
+We clearly see an initial male bias at birth of the population pyramid in 1989 then drastically turned into female bias by the 25-29 age group. This is reasonable considering the end period of the Vietnam war in 1970s. Further, over time, we see the male bias at birth starting to dominate other age groups at older ages with currently in 2024 the male bias is dominating up until 45 years of age. Thus, we dive deeper into the sex ratio at birth and at different age group of the population over time. 
+
+```{r}
+
+# Filter the dataframe for specific age groups
+df <- Population_Data_by_Age_formated %>% 
+  select(Year, Age_Group, `Sex ratio of the population`) %>%
+  filter(Age_Group == "0" | grepl("^10|^20|^30|^40|^50|^60|^70|^80|^90|^100", Age_Group))
+
+# Filter the dataframe for specific age groups
+df <- Population_Data_by_Age_formated %>% 
+  select(Year, Age_Group, `Sex ratio of the population`) %>%
+  filter(Age_Group == "0" | grepl("^10|^20|^30|^40|^50|^60|^70|^80|^90|^100", Age_Group))
+
+# Create the plot
+Sex_Ratio_OT <- df %>%
+  plot_ly(x = ~Year, y = ~`Sex ratio of the population`, color = ~Age_Group, type = 'scatter', mode = 'lines') %>%
+  layout(title = "Sex Ratio Over Time by Age Group",
+         xaxis = list(title = "Year"),
+         yaxis = list(title = "Sex Ratio"),
+         shapes = list(
+           list(
+             type = "line",
+             line = list(dash = "dash", color = "black"),
+             x0 = 2024, x1 = 2024, y0 = 0, y1 = 1,
+             xref = 'x', yref = 'paper'
+           )
+         ))
+
+# Display the plot
+Sex_Ratio_OT
+
+# Remove unnecessary variables
+rm(df)
+rm(Sex_Ratio_OT)
+
+```
+
+We see that before and by 2024, the majority of age group above the age of 30 are female dominated. This patterns is more and more drastic the older the population. However, we also notice a male bias at birth forming in the 2010s and its effects continuing until 2080 when this generation starting to returning to equilibrium due to old age. On a overview point of view, we see that in all age groups there is either a male bias sex ratio or having a trend toward male bias in the population. While this patterns may have historical causes due to war, the relative peace since 1975 and the forming of male bias at birth of newer generations show a son preference culture in the country. This male bias at birth reaches a peak at 1.13 or 113 boy born relative to 100 girl born. The trends is predicted to decline but would prolong until 2050s when the population levels declining (as shown in above graph). As such, we have reason to believe in a connection between a male bias population at birth and the declining population growth rate. 
+
+
+2. checking assumptions
+
+It's clear that the population levels and rate of changes of population follows a pattern of increasing then decreasing and decreasing respectively. In addition, other trends and patterns within the data is also shown up through the graphs above. Thus, we recognize the need to check for assumptions before implementing any models employing time series dataset. 
+
+(We would further develop assumptions check section here in the near future, for now assumptions associated with current model would be checked within such section)
+
+3. Early model
+
+a. Simple OLS with Time Series Adjustments model between main dependent and independent variable
+
+We first start off with testing a simple dataset with only our main dependent and independent variable: being population change and sex ratio at birth over time respectively. 
+
+```{r}
+# sex ratio at birth over time 
+SRB <- Population_Data_by_Age_formated %>% 
+  select(Year, Age_Group, `Sex ratio of the population`) %>% 
+  filter(Age_Group == "0") %>% 
+  select(-Age_Group)
+
+# simple model dataset
+sim_data <- General_Population_Data %>% 
+  select(Year, `Annual Growth Rate %`) %>% 
+  merge(SRB, by = "Year") %>% 
+  select(-Year) %>% 
+  ts()
+  
+head(sim_data)
+```
+
+Before running the model, we check for stationarity. 
+
+```{r}
+# Applying the ADF test to 'Annual Growth Rate %'
+adf.test(sim_data[, "Annual Growth Rate %"])
+
+# Applying the ADF test to 'Sex ratio of the population'
+adf.test(sim_data[, "Sex ratio of the population"])
+```
+
+We notice that both variables have p-value greater than 0.05, thus suggesting that the data is likely to be non-stationary. We thus, implement first differencing and retest for stationary. 
+
+```{r}
+# First Differencing
+diff_annual_growth_rate <- diff(sim_data[, "Annual Growth Rate %"])
+diff_sex_ratio <- diff(sim_data[, "Sex ratio of the population"])
+
+# retest for stationary
+# For Annual Growth Rate %
+adf.test(diff_annual_growth_rate, alternative = "stationary")
+
+# For Sex Ratio of the Population
+adf.test(diff_sex_ratio, alternative = "stationary")
+
+```
+
+Since the result of diff_sex_ratio's ADF test still shows p-value larger than 0.05, we continue with differencing and retest for stationary. 
+
+```{r}
+# Second Differencing
+diff_sex_ratio <- diff(diff_sex_ratio)
+
+# retest for stationary
+# For Sex Ratio of the Population
+adf.test(diff_sex_ratio, alternative = "stationary")
+
+```
+
+We see that the current p-value is significantly less than 0.05 and Dickey-Fuller's value is smaller than 0, this strongly suggest that the 2nd differenced of sex ratio of the population is stationary. Thus, we forward with 1st differenced of annual growth rate and 2nd differenced of sex ratio of the population (at birth). 
+
+We then implement OLS with these modified variables. 
+
+```{r}
+# Ensure that both series start and end at the same time point
+diff_annual_growth_rate_aligned <- diff_annual_growth_rate[-1]  # Remove the first observation
+diff_sex_ratio_aligned <- diff_sex_ratio  
+
+
+sim_model <- lm(diff_annual_growth_rate_aligned ~ diff_sex_ratio_aligned)
+
+# Summary of the model
+summary(sim_model)
+
+modelsummary(sim_model)
+```
+
+We see that OLS indicates no significant relationship between our 2nd-differenced independent variable and differenced dependent variable with a high variable and model value of more than 0.5. We also see that the adjusted R-squared and multiple R-squared are both 0 or even negative, thus, indicates that the 2nd-differenced independent variable does not explain any variation of the differenced dependent variable. We also test for autocorrelation. 
+
+```{r}
+dwtest(sim_model)
+
+```
+
+We notice the DW value at 1.5 indicates somewhat mild positive autocorrelation in the residuals of regression model. 
+
+We conclude from OLS model testing for stationary and autocorrelation that the 2nd-differenced sex ratio variable does not have any relationship with 1st-differenced annual change of population levels. 
+
+We expect this results because the model is a simplistic model that only contain 1 modified-independent and 1 modified-dependent variable. Further, we recognize that the relationship between sex ratio at birth and population change would be indirect, i.e affecting through fertility and other variables, as well as take a lag time more than 15-20 years so that the difference in number of male and female would start to affect fertility rate. Nonetheless, for now, we conclude no-relationship between our modified-independent and modified-dependent variables. 
+
+
+```{r}
+
+```
+
+
+
+
+
