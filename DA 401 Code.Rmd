@@ -44,7 +44,7 @@ General_Population_Data <- read_csv("Datasets/General Population Data.csv")
 # Composite Indices dataset
 Composite_indices <- read_csv("Datasets/Composite indices.csv")
 
-## Corresponding Composite Indices metadata
+# Corresponding Composite Indices metadata
 Composite_indices_metadata <- read_excel("Datasets/Composite indices metadata.xlsx")
 
 # Unemployment rate dataset.  
