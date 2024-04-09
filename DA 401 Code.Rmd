@@ -28,11 +28,15 @@ library(lmtest)
 library(forecast)
 library(modelsummary)
 library(zoo)
-
-
+library(urca)
+library(dynlm)
+library(car)
 ```
 
-In this analysis, we will attempt to model and isolate the effect of sex ratio at birth in Vietnam's impact to population change. To begin with, we import the dataset from our local device. 
+In this analysis, we will attempt to model and isolate the effect of sex ratio at birth in Vietnam's impact to population change. 
+# Data Importation and Cleaning
+
+To begin with, we import the dataset from our local device. 
 
 ```{r}
 # Vietnam Population Data decomposed by Ages. 
@@ -58,6 +62,9 @@ Contraceptive <- read_excel("C:/Users/nthao/OneDrive/Desktop/DA 401 Project/Data
     skip = 3)
 
 ```
+
+
+### Data Cleaning and Wrangling
 
 We then proceed to execute initial data cleaning and wrangling. We note that because of the lack of contraceptive data from the World Bank of Vietnam, we use a data interpolation method. Specifically, this method fills initial and last missing values with the first and last available non-missing value respectively, and then employs linear interpolation to estimate and fill in the subsequent missing values based on the nearest known data points. 
 
@@ -284,10 +291,9 @@ rm(Contraceptive)
 ```
 
 
+# Summary Statistics
 
-Summary Statistics: We perform summary statistics
-
-1. Comprehensive dataset: `main_df` 
+### Comprehensive dataset: `main_df` 
 
 Regarding the `main_df` dataset, we create a correlation matrix between all dependent and independent variables to identify potential multicollinearity or relationships. 
 
@@ -336,8 +342,6 @@ corr_matrix
 # Remove unnecessary variable names from global environment 
 rm(threshold)
 rm(corr_matrix)
-
-names(main_df)
 ```
 
 
@@ -345,15 +349,15 @@ We see that marking the threshold for large correlated variables at absolute val
 
 For now, we plan to identify the variables that are created using metrics that are similar to other variables. However, further identification of these variables would be conducted in the future. 
 
-2. General Population Data 
+### General Population Data 
 
 Population change is our main dependent variable, as such, we attempt to graph population levels and rate of change (%) over time. We notice that the dataset General_Population_Data includes past, current, and future projection of population data until 2100. We thus marks a dash line at 2024 to separate between real and projected data. 
 
-We proceed to graph out the historical and projection of the country population from 1989 till 2100. 
+We proceed to graph out the historical and projection of the country population from 1989 till 2100 from our dataset. 
 
 ```{r}
 # graph out the historical and projection population of the country. 
-ggplot(General_Population_Data, aes(x = Year)) +
+pop_trend <- ggplot(General_Population_Data, aes(x = Year)) +
   geom_line(aes(y = Population, colour = "Population"), size = 1) +
   geom_line(aes(y = `Annual Growth Rate %` * 100000000, colour = "Rate of Change"), size = 1) +
   geom_vline(xintercept = 2024, linetype = "dashed", color = "black") + # Add dashed line at year 2024: years to the right being projection
@@ -363,12 +367,23 @@ ggplot(General_Population_Data, aes(x = Year)) +
     sec.axis = sec_axis(~ (. / 100000000), name="Rate of Change (%)")
   ) +
   labs(colour = "Legend") +
-  theme_minimal()
+  theme_minimal() + 
+  theme(
+    axis.text.x = element_text(size = 12), # Change axis text size for x axis
+    axis.text.y = element_text(size = 12), # Change axis text size for y axis
+    axis.title.x = element_text(size = 12), # Change axis title size for x axis
+    axis.title.y = element_text(size = 12)  # Change axis title size for y axis
+  )
+
+ggsave("pop_trend.jpeg", plot = pop_trend, width = 10, height = 6, dpi = 300)
+
+pop_trend
+
 ```
 
-We see that since 1989 till now, the population of Vietnam has been on an increasing trend. However, we also see that the population levels would peak around the 2050s. In term of the change in population levels, the population growth rate has been in declined rapidly since the beginning of available dataset (1989) from more than 2% to less than 0% annually in 60 years. We note however, that the chart only provides an overview of the population trends. 
+We see that since 1989 till now, the population of Vietnam has been on an increasing trend. However, we also see that the population levels would be projected to peak around the 2050s. In term of the change in population levels, the population growth rate has been in declined rapidly since the beginning of available dataset (1989) from more than 2% to a predicted rate of less than 0% annually in 60 years. However, we note that the chart only provides an overview of the population trends and historical as well as projected population data may very well varies with different characteristics.  
 
-Thus, we further decompose the population by age group by creating a population pyramid over time. We convert the `Population_Data_by_Age` into an age structure pyramid. We first reorder the dataset into age groups of interval 5 except for age 0 (being bornt) and interval 1-4 years old then create the pyramid. 
+Thus, we further decompose the population by age group by creating a population pyramid over time. We convert the `Population_Data_by_Age` into an age structure pyramid. We first reorder the dataset into age groups of interval 5 years, except for age 0 (being born) and interval 1-4 years old then create the pyramid. 
 
 ```{r}
 # Reshape data
@@ -461,9 +476,9 @@ rm(slider_steps)
 ```
 
 
-From the population pyramid over time, we can clearly see a generation less than 30 years old in 1989 created a large bump in the population pyramid. This generation is likely to drive population growth in the year ahead as they were heading into prime age to establish a family. In addition, we also saw that the number of children being bornt (age 0) decline over time. Thus, signaling declining fertility being the main drivers of population reduction in the long term. Still, we note the fact that in each age group the large increase in population levels does not have a corresponding dramatic reduction. This is likely due to advancement in adopting modern healthcare system, thus, keeping more people living at the same time and keeps the age group wide for longer. 
+From the population pyramid over time, we can clearly see a generation less than 30 years old in 1989 created a large bump in the population pyramid. This generation is likely to drive population growth in the year ahead as they were heading into prime age to establish a family. In addition, we also saw that the number of children being born (age 0) decline over time. Thus, signaling declining fertility being the main drivers of population reduction in the long term. Still, we note the fact that in each age group the large increase in population levels does not have a corresponding dramatic reduction. This is likely due to advancement in adopting modern healthcare system, thus, keeping more people living at the same time and keeps the age group wide for longer. 
 
-Most importantly, we notice further from the pyramid that there are differences between the number of males and females at every age group with initially male outnumbers female individuals then the trends reversed with increase age groups. As such, we visualize the difference between number of male and female at birth and at each age group. 
+Most importantly, we notice further from the pyramid that there are differences between the number of males and females at every age group with initially male outnumbers female individuals, then the trends reversed with increasing age groups. As such, we visualize the difference between number of male and female at birth and at each age group. 
 
 ```{r}
 # Creating an ordered factor for Age_Group
@@ -529,6 +544,8 @@ rm(df_difference)
 rm(df_pyramid)
 rm(age_group_levels)
 rm(pop_pyramid_diff)
+
+
 ```
 
 We clearly see an initial male bias at birth of the population pyramid in 1989 then drastically turned into female bias by the 25-29 age group. This is reasonable considering the end period of the Vietnam war in 1970s. Further, over time, we see the male bias at birth starting to dominate other age groups at older ages with currently in 2024 the male bias is dominating up until 45 years of age. Thus, we dive deeper into the sex ratio at birth and at different age group of the population over time. 
@@ -571,111 +588,419 @@ rm(Sex_Ratio_OT)
 
 We see that before and by 2024, the majority of age group above the age of 30 are female dominated. This patterns is more and more drastic the older the population. However, we also notice a male bias at birth forming in the 2010s and its effects continuing until 2080 when this generation starting to returning to equilibrium due to old age. On a overview point of view, we see that in all age groups there is either a male bias sex ratio or having a trend toward male bias in the population. While this patterns may have historical causes due to war, the relative peace since 1975 and the forming of male bias at birth of newer generations show a son preference culture in the country. This male bias at birth reaches a peak at 1.13 or 113 boy born relative to 100 girl born. The trends is predicted to decline but would prolong until 2050s when the population levels declining (as shown in above graph). As such, we have reason to believe in a connection between a male bias population at birth and the declining population growth rate. 
 
+### Note
 
-2. checking assumptions
-
-It's clear that the population levels and rate of changes of population follows a pattern of increasing then decreasing and decreasing respectively. In addition, other trends and patterns within the data is also shown up through the graphs above. Thus, we recognize the need to check for assumptions before implementing any models employing time series dataset. 
-
-(We would further develop assumptions check section here in the near future, for now assumptions associated with current model would be checked within such section)
-
-3. Early model
-
-a. Simple OLS with Time Series Adjustments model between main dependent and independent variable
-
-We first start off with testing a simple dataset with only our main dependent and independent variable: being population change and sex ratio at birth over time respectively. 
+We note before our analysis. We consider only historical data and not projected data from our dataset. Thus, we modify the datasets as follow: 
 
 ```{r}
-# sex ratio at birth over time 
-SRB <- Population_Data_by_Age_formated %>% 
-  select(Year, Age_Group, `Sex ratio of the population`) %>% 
-  filter(Age_Group == "0") %>% 
-  select(-Age_Group)
+# Identify all main datasets real observations only using main_df
+Population_Data_by_Age_formated <- Population_Data_by_Age_formated[as.numeric(Population_Data_by_Age_formated$Year) %in% as.numeric(main_df$Year),]
+
+General_Population_Data <- General_Population_Data[as.numeric(General_Population_Data$Year) %in% as.numeric(main_df$Year),]
+
+Population_Data_by_Age <- Population_Data_by_Age[as.numeric(Population_Data_by_Age$Year) %in% as.numeric(main_df$Year),]
+
+```
+
+
+# Analysis 
+
+### Simple OLS with Time Series Adjustments model between main dependent and independent variable
+
+We first start off with implementing a simple linear regression between our main dependent and independent variable: being population change and sex ratio at birth over time respectively. We show the first 6 observations within the dataset. We note that the value of `Sex ratio of the population` being number of males per 1000 females. 
+
+```{r}
+# sex ratio of a specified age group 
+sex_ratio_df <- Population_Data_by_Age %>%
+  filter(GROUP >= 15, GROUP <= 49) %>%
+  group_by(Year) %>%
+  summarize(
+    TotalMalePopulation = sum(`Male Population`),
+    TotalFemalePopulation = sum(`Female Population`),
+    SexRatio = TotalMalePopulation / TotalFemalePopulation * 1000
+  ) %>%
+  select(Year, SexRatio)
 
 # simple model dataset
 sim_data <- General_Population_Data %>% 
   select(Year, `Annual Growth Rate %`) %>% 
-  merge(SRB, by = "Year") %>% 
+  merge(sex_ratio_df, by = "Year") %>% 
   select(-Year) %>% 
+  mutate(`Sex ratio of the population` = 1000*SexRatio) %>% 
   ts()
   
+# first few lines of the dataset. 
 head(sim_data)
 ```
 
-Before running the model, we check for stationarity. 
+Before running the model, we check for variables' stationary. 
 
 ```{r}
+# Creating syntax to store relevant variables 
+`Annual Growth Rate %` <- sim_data[, "Annual Growth Rate %"]
+`Sex ratio of the population` <- sim_data[, "Sex ratio of the population"]
+
 # Applying the ADF test to 'Annual Growth Rate %'
-adf.test(sim_data[, "Annual Growth Rate %"])
+summary(ur.df(diff(`Annual Growth Rate %`), type="drift", lags = 10, selectlags = c("AIC")))
 
 # Applying the ADF test to 'Sex ratio of the population'
-adf.test(sim_data[, "Sex ratio of the population"])
+summary(ur.df(diff(diff(`Sex ratio of the population`)), type="drift", lags = 5, selectlags = c("AIC")))
+
 ```
 
-We notice that both variables have p-value greater than 0.05, thus suggesting that the data is likely to be non-stationary. We thus, implement first differencing and retest for stationary. 
+We notice that the results of Augmented Dickey-Fuller Test varies between the 2 variables but do not support clear stationary for either variables. Specifically, we note `Sex ratio of the population` variable's Dickey-Fuller statistics and p-value of `r round(adf.test(sim_data[, "Sex ratio of the population"])$statistic,3)` and `r round(adf.test(sim_data[, "Sex ratio of the population"])$p.value ,3)` respectively, indicating clear non-stationary due to a not sufficiently negative Dickey-Fuller statistics and a high p-value. In term of `Annual Growth Rate %` variable's results of `r round(adf.test(sim_data[, "Annual Growth Rate %"])$statistic,3)` and `r round(adf.test(sim_data[, "Annual Growth Rate %"])$p.value ,3)` for Dickey-Fuller statistics and p-value respectively, we see moderate support for stationary. This is because the Dickey-Fuller statistics for `Annual Growth Rate %` is sufficiently negative at 5% and the p-value is still significant at 10% level. 
+
+Nonetheless, we continue with implement first differencing for both variables and retest for stationary. We believe that while the result for `Annual Growth Rate %` stationary being inconclusive, differencing would likely support both variables to achieve stationary. We show the first 6 observations of differencing variables. 
 
 ```{r}
 # First Differencing
-diff_annual_growth_rate <- diff(sim_data[, "Annual Growth Rate %"])
-diff_sex_ratio <- diff(sim_data[, "Sex ratio of the population"])
+diff_annual_growth_rate <- diff(`Annual Growth Rate %`)
+diff_sex_ratio <- diff(`Sex ratio of the population`)
 
+# first few lines of both variables 
+head(ts(data.frame(diff_annual_growth_rate, diff_sex_ratio)))
+```
+
+In addition, we are aware of the existence of male-bias sex ratio at birth in Vietnam, stems from culture, economical, and historical background. As such, we believe there exists an underlying trend driving the increase in male-bias sex ratio at birth for the population. Thus, we retest for stationary:  
+
+```{r}
 # retest for stationary
 # For Annual Growth Rate %
 adf.test(diff_annual_growth_rate, alternative = "stationary")
 
 # For Sex Ratio of the Population
-adf.test(diff_sex_ratio, alternative = "stationary")
-
+summary(ur.df(diff_sex_ratio, type="trend"))
 ```
 
-Since the result of diff_sex_ratio's ADF test still shows p-value larger than 0.05, we continue with differencing and retest for stationary. 
+The ADF test results for the `diff_annual_growth_rate` variable yielded a Dickey-Fuller statistic of `r round(adf.test(diff_annual_growth_rate, alternative = "stationary")$statistic,3)` with a p-value of `r round(adf.test(diff_annual_growth_rate, alternative = "stationary")$p.value,3)`.The high p-value, well above the conventional threshold levels at 1%, 5% and 10% significance, indicates a failure to reject the null hypothesis of a unit root, suggesting that the differenced annual growth rate series remains non-stationary.
+
+Similarly, `diff_sex_ratio` variable yielded a Dickey-Fuller statistic of `r round(ur.df(diff_sex_ratio, type="trend")@teststat[1],3)` with an associated p-value of `r round(0.03881,3)`, suggesting not enough evidence for rejecting of the null hypothesis of a unit root with a linear time trend. 
+
+We thus further differencing both variables and re-test the variable for stationary. 
 
 ```{r}
 # Second Differencing
-diff_sex_ratio <- diff(diff_sex_ratio)
+sed_diff_annual_growth_rate <- diff(diff_annual_growth_rate)
+sed_diff_sex_ratio <- diff(diff_sex_ratio)
 
 # retest for stationary
-# For Sex Ratio of the Population
-adf.test(diff_sex_ratio, alternative = "stationary")
+# For population growth rate annually
+adf.test(sed_diff_annual_growth_rate, alternative = "stationary")
+
+# for annual sex ratio
+summary(ur.df(sed_diff_sex_ratio, type="trend"))
 
 ```
 
-We see that the current p-value is significantly less than 0.05 and Dickey-Fuller's value is smaller than 0, this strongly suggest that the 2nd differenced of sex ratio of the population is stationary. Thus, we forward with 1st differenced of annual growth rate and 2nd differenced of sex ratio of the population (at birth). 
+We see that the variable `sed_diff_annual_growth_rate` being the 2nd differencing of `Annual Growth Rate %` variable possess a Dickey-Fuller statistics of `r round(adf.test(sed_diff_annual_growth_rate, alternative = "stationary")$statistic,3)` and a p-value of `r round(adf.test(sed_diff_annual_growth_rate, alternative = "stationary")$p.value,3)` after performing ADF test. This results indicate the time series variable is on the borderline of stationary according to the 5% threshold but can be considered stationary at a slightly less stringent level. Similarly, the `sed_diff_sex_ratio` being the 2nd differencing of `Sex ratio of the population` possess a Dickey-Fuller statistics of `r round(ur.df(sed_diff_sex_ratio, type="trend")@teststat[1],3)` and a p-value of `r round(0.0009192,4)` after performing ADF test.
 
-We then implement OLS with these modified variables. 
+Hence, we then implement OLS with these modified variables: `sed_diff_annual_growth_rate` and `sed_diff_sex_ratio`. However, before analyzing the model's results, we check for cointegration between the dependent and independent variables of the model. 
 
 ```{r}
-# Ensure that both series start and end at the same time point
-diff_annual_growth_rate_aligned <- diff_annual_growth_rate[-1]  # Remove the first observation
-diff_sex_ratio_aligned <- diff_sex_ratio  
+# simple linear regression model
+sim_model <- lm(sed_diff_annual_growth_rate ~ sed_diff_sex_ratio)
 
+# Check for cointegration by testing for stationary of residuals
+summary(ur.df(residuals(sim_model), type="trend"))
+```
 
-sim_model <- lm(diff_annual_growth_rate_aligned ~ diff_sex_ratio_aligned)
+The ADF test for including a trend component was applied to the residuals of the model. The test results yielded a notably significant Dickey-Fuller statistic of `r round(ur.df(residuals(sim_model), type="trend")@teststat[1],3)`. When compared to the critical values for the ADF test (tau3), this statistic is well beyond the critical value at the 1% level (-4.15). Such a substantial deviation into negative territory indicates a clear rejection of the null hypothesis of a unit root, implying that the residuals are stationary, and thus, the dependent and independent variables possess positive a strong indication of cointegration. Thus, the result implies a long-term equilibrium relationship between the 2 variables. 
 
-# Summary of the model
+We thus continue with OLS regression's results. 
+
+```{r}
 summary(sim_model)
-
-modelsummary(sim_model)
+mcvbn$coefficients[2,1]
 ```
 
-We see that OLS indicates no significant relationship between our 2nd-differenced independent variable and differenced dependent variable with a high variable and model value of more than 0.5. We also see that the adjusted R-squared and multiple R-squared are both 0 or even negative, thus, indicates that the 2nd-differenced independent variable does not explain any variation of the differenced dependent variable. We also test for autocorrelation. 
+We see that the regression model yields results indicating a statistically insignificant relationship between the second differenced annual population growth rate `sed_diff_annual_growth_rate` and the second differenced sex ratio at birth or number of males per 1000 females born `sed_diff_sex_ratio`. We observe that the intercept, independent, and model's p-values are all significantly larger than 0.5, suggesting a statistically insignificant relationship. Additionally, the model's multiple R-squared value is 0.00145, indicating that only a small fraction of the variance in the dependent variable is explained by the model, suggesting a weak explanatory power. 
+
+We expect this results because the model is a simplistic model that only contain 1 modified-independent and 1 modified-dependent variable. Further, we recognize that the relationship between sex ratio and population change would be convoluted, i.e affecting through fertility and other variables, as well as take a lag time components so that the difference in number of male and female would start to affect fertility rate. Nonetheless, for now, we conclude no-relationship between our modified-independent and modified-dependent variables. 
+
+### Autoregressive Distributed Lag (ARDL) Model 
+
+From the results of a simple OLS time series adjustments model, we note that both population growth rate % and sex ratio at birth are non-stationary with population growth rate % achieving stationary at 2nd order differenced and sex ratio at birth achieving stationary at 1st order differenced. As such, we choose the further our analysis by implementing ARDL model. This is because: 
+
+- The ARDL model can accommodate variables that are integrated at different orders (I(0), I(1)). This flexibility is a key advantage, as it allows for the direct inclusion of variables with different levels of differencing, without the need to pre-difference all series to the same order of integration. 
+- ARDL models uniquely allow for the estimation of both long-run and short-run dynamics simultaneously. 
+- ARDL model is known for its robustness in small sample sizes, critically relevant for our dataset. 
+
+Nonetheless, we do note that since ARDL model assume stationary at I(1) and population growth rate % only achieving stationary at 2nd order differenced. Thus, our dependent variable would the 1st order differenced population growth rate % rather than absolute level population growth rate %. 
+
+In addition, having detected the connection between dependent and independent variable using simple linear regression, we see that the current level of sex ratio at birth does not have any explanatory power over population change. Thus, we focus our continue analysis in dynamic model (model with independent variables being lag version)
+
+1. ARDL model with 1 dependent and 1 independent variable. 
+
+We first start with identify lag length for both dependent and independent variables by using information criteria: AIC, BIC.
 
 ```{r}
-dwtest(sim_model)
+# model data
+data <- data.frame(diff_annual_growth_rate, diff_sex_ratio)
+
+# We test until the lag level: 5
+max_lag_diff_annual_growth_rate <- 5
+max_lag_diff_sex_ratio <- 5
+
+# Create matrix to identify optimal lags. 
+aic_values <- matrix(NA, nrow = max_lag_diff_annual_growth_rate, ncol = max_lag_diff_sex_ratio)
+bic_values <- matrix(NA, nrow = max_lag_diff_annual_growth_rate, ncol = max_lag_diff_sex_ratio)
+
+# Fill in matrix
+for (lag_growth in 1:max_lag_diff_annual_growth_rate) {
+  for (lag_sex_ratio in 1:max_lag_diff_sex_ratio) {
+    formula <- as.formula(paste("diff_annual_growth_rate ~ L(diff_annual_growth_rate, 1:", 
+                                 lag_growth, ") + L(diff_sex_ratio, 1:", 
+                                 lag_sex_ratio, ")", sep=""))
+    model <- dynlm(formula, data = data)
+    aic_values[lag_growth, lag_sex_ratio] <- AIC(model)
+    bic_values[lag_growth, lag_sex_ratio] <- BIC(model)
+  }
+}
+
+# Identify optimal lag 
+optimal_lag_aic <- which(aic_values == min(aic_values), arr.ind = TRUE)
+optimal_lag_bic <- which(bic_values == min(bic_values), arr.ind = TRUE)
 
 ```
 
-We notice the DW value at 1.5 indicates somewhat mild positive autocorrelation in the residuals of regression model. 
+Our AIC results indicate an optimal lag length of `r optimal_lag_aic[1]` and `r optimal_lag_aic[2]`, whereas BIC's results indicate an optimal lag length of `r optimal_lag_bic[1]` and `r optimal_lag_bic[2]` for dependent and independent variable respectively. 
 
-We conclude from OLS model testing for stationary and autocorrelation that the 2nd-differenced sex ratio variable does not have any relationship with 1st-differenced annual change of population levels. 
-
-We expect this results because the model is a simplistic model that only contain 1 modified-independent and 1 modified-dependent variable. Further, we recognize that the relationship between sex ratio at birth and population change would be indirect, i.e affecting through fertility and other variables, as well as take a lag time more than 15-20 years so that the difference in number of male and female would start to affect fertility rate. Nonetheless, for now, we conclude no-relationship between our modified-independent and modified-dependent variables. 
-
+Thus, in term of AIC, we infer a model and model's results of:  
 
 ```{r}
+# Using the optimal lag determined by AIC
+optimal_lag_growth_aic <- optimal_lag_aic[1, 1]
+optimal_lag_sex_ratio_aic <- optimal_lag_aic[1, 2]
+
+# apply model 
+AIC_optimal <- as.formula(paste("diff_annual_growth_rate ~ L(diff_annual_growth_rate, 1:",
+                                    optimal_lag_growth_aic, ") + L(diff_sex_ratio, 1:",
+                                    optimal_lag_sex_ratio_aic, ")", sep=""))
+AIC_ARDL <- dynlm(AIC_optimal, data = data)
+# model's result 
+summary(AIC_ARDL)
+
+# Calculate the p-value
+AIC_p_value <- pf(summary(AIC_ARDL)$fstatistic[1], summary(AIC_ARDL)$fstatistic[2], summary(AIC_ARDL)$fstatistic[3], lower.tail = FALSE)
 
 ```
 
+And, in term of BIC, we infer a model and model's results of:  
+
+```{r}
+# Using the optimal lag determined by BIC
+optimal_lag_growth_bic <- optimal_lag_bic[1, 1]
+optimal_lag_sex_ratio_bic <- optimal_lag_bic[1, 2]
+
+BIC_optimal <- as.formula(paste("diff_annual_growth_rate ~ L(diff_annual_growth_rate, 1:",
+                                    optimal_lag_growth_bic, ") + L(diff_sex_ratio, 1:",
+                                    optimal_lag_sex_ratio_bic, ")", sep=""))
+
+BIC_ARDL <- dynlm(BIC_optimal, data = data)
+
+# Results
+summary(BIC_ARDL)
+
+# Calculate the p-value
+BIC_p_value <- pf(summary(BIC_ARDL)$fstatistic[1], summary(BIC_ARDL)$fstatistic[2], summary(BIC_ARDL)$fstatistic[3], lower.tail = FALSE)
+```
+
+Since we see that AIC's model perform similarly well with that of BIC with both suggesting same lags length for both variables. We see that both models thus return adjusted R-squared of `r round(summary(AIC_ARDL)$adj.r.squared,2)` as well as model's p-value of `r round(AIC_p_value, 3)`  
+
+As such, we would move forward with lag results of `r optimal_lag_aic[1]` and `r optimal_lag_aic[2]` for dependent and independent variable respectively. We check accuracy for the lag models. 
+
+```{r}
+checkresiduals(AIC_ARDL)
+```
+
+We visually confirm that the residuals to appear random and centered around zero. In additon, we see that there is no ACF value that less than -0.3 or more than 0.3, indicating no-present of autocorrelation. Nonetheless, we also see that the residuals distribution only roughly follow a random distribution with a mean of approximately at 0, thus, somewhat weaken our model. 
+
+From the AIC model results, we could say that: 
+
+Lagged Effect of Change of Population Growth Rate: The significant positive coefficient for the second lag of the population growth rate indicates a persistence effect in population growth. This could imply that factors affecting population growth have a lasting impact over a two-year period.
+
+Insignificance of Sex Ratio: The lack of significance in the 1st order differenced sex ratio's lagged terms suggests that, in this model and with these data, the sex ratio does not have a statistically identifiable impact on the annual growth rate of the population. This could be due to a variety of reasons, such as other more influential factors not included in the model or the possibility that the effect of sex ratio on population growth does not manifest in the immediate short term of around 1 to 2 years. 
+
+2. ARDL model with 1 dependent and multiple independent variable. 
+
+We understand that in demographic studies, population change is driven directly by 4 factors: fertility rate, mortality rate, immigration rate, and emigration rate. In addition, we take into account other factors by including: HDI, GDI, and GII. 
+
+We check for covariates' stationary. Similar to dependent and independent variables, we use ADF test: 
+
+```{r}
+# check stationary of fertility rate with trend component (because we assume that 2 child policy works)
+summary(ur.df(diff(main_df$`Total Fertility Rate`), type="trend", lags = 10, selectlags = "AIC"))
+
+# check stationary of rate of change of the slope of life expectancy at birth, both sexes (because we assume there is a decreasing marginal gain with each additonal longer year of life)
+summary(ur.df(main_df$`Life Expectancy at Birth, Both Sexes`, type="drift", lags = 10, selectlags = "AIC")) # in ARDL I(0) at 1st differencing
+
+# no need assumption
+summary(ur.df(diff(diff(main_df$`Net Migration Rate`)), type="drift", lags = 10, selectlags = "AIC"))
+
+# hdi marginal gains decrease over time. 
+summary(ur.df(diff(main_df$hdi), type = "trend"))
+
+# gdi marginal gain decrease over time
+summary(ur.df(diff(main_df$gdi), type = "trend"))
+
+# gii reached stationary at 2rd differencing
+summary(ur.df(diff(diff(main_df$gii)), type="trend", lags = 10, selectlags = "AIC"))
+
+diff_annual_growth_rate
+diff_sex_ratio
+main_df$`Total Fertility Rate`
+# model data 
+data <- data.frame(diff_annual_growth_rate = diff_annual_growth_rate,
+                   diff_sex_ratio = diff_sex_ratio,
+                   TFR = main_df$`Total Fertility Rate`[-1],
+                   `Net Migration Rate`= main_df$`Net Migration Rate`[-1],
+                   hdi = main_df$hdi[-1],
+                   gdi = diff(main_df$gdi),
+                   diff_gii = diff(main_df$gii), check.names = FALSE) 
+```
 
 
+b. Define Optimal Lag
 
+Having had the data, we determine the optimal amount of lags based on AIC or BIC criteria. 
+
+```{r}
+# Define maximum lag for each variable
+max_lag <- 4
+data <- na.omit(data)
+data_test <- na.omit(data)
+
+# Pre-generate lagged variables for independent variables
+for (lag in 1:max_lag) {
+  # Generate lagged variables for the dependent variable
+  data_test[[paste("lagged_growth_rate", lag, sep = "_")]] <- lag(data_test$diff_annual_growth_rate, lag)
+  # Generate lagged variables for the independent variable
+  data_test[[paste("lagged_sex_ratio", lag, sep = "_")]] <- lag(data_test$diff_sex_ratio, lag)
+  data_test[[paste("lagged_TFR", lag, sep = "_")]] <- lag(data_test$TFR, lag)
+  data_test[[paste("lagged_migration", lag, sep = "_")]] <- lag(data_test$`Net Migration Rate`, lag)
+  data_test[[paste("lagged_hdi", lag, sep = "_")]] <- lag(data_test$hdi, lag)
+  data_test[[paste("lagged_gdi", lag, sep = "_")]] <- lag(data_test$gdi, lag)
+  data_test[[paste("lagged_gii", lag, sep = "_")]] <- lag(data_test$diff_gii, lag)
+}
+
+# Create matrices for AIC and BIC values
+aic_values <- array(NA, dim = c(rep(max_lag + 1, 7)))
+bic_values <- array(NA, dim = c(rep(max_lag + 1, 7)))
+
+# Nested loop for model fitting
+for (lag0 in 0:max_lag) {  # Lag for the dependent variable
+  for (lag1 in 0:max_lag) {
+    for (lag2 in 0:max_lag) {
+      for (lag3 in 0:max_lag) {
+        for (lag4 in 0:max_lag) {
+          for (lag5 in 0:max_lag) {
+            for (lag6 in 0:max_lag) {
+              # Skip if all lags are zero
+              if (lag0 == 0 && lag1 == 0 && lag2 == 0 && lag3 == 0 && lag4 == 0 && lag5 == 0 && lag6 == 0) {
+                next
+              }
+  
+              # Construct the model formula
+              formula_parts <- c("diff_annual_growth_rate ~")
+              if (lag0 > 0) formula_parts <- c(formula_parts, paste("lagged_growth_rate", lag0, sep = "_"))
+              if (lag1 > 0) formula_parts <- c(formula_parts, paste("lagged_sex_ratio", lag1, sep = "_"))
+              if (lag2 > 0) formula_parts <- c(formula_parts, paste("lagged_TFR", lag2, sep = "_"))
+              if (lag3 > 0) formula_parts <- c(formula_parts, paste("lagged_migration", lag3, sep = "_"))
+              if (lag4 > 0) formula_parts <- c(formula_parts, paste("lagged_hdi", lag4, sep = "_"))
+              if (lag5 > 0) formula_parts <- c(formula_parts, paste("lagged_gdi", lag5, sep = "_"))
+              if (lag6 > 0) formula_parts <- c(formula_parts, paste("lagged_gii", lag6, sep = "_"))
+
+              model_formula <- as.formula(paste(formula_parts, collapse = " + "))
+  
+              # Fit the model
+              model <- dynlm(model_formula, data = data_test)
+  
+              # Store AIC and BIC values
+              aic_values[lag0 + 1, lag1 + 1, lag2 + 1, lag3 + 1, lag4 + 1, lag5 + 1, lag6 + 1] <- AIC(model)
+              bic_values[lag0 + 1, lag1 + 1, lag2 + 1, lag3 + 1, lag4 + 1, lag5 + 1, lag6 + 1] <- BIC(model)
+              
+            }
+          }
+        }
+      }
+    }
+  }
+}
+# Handle NA values in aic_values and bic_values
+aic_values[is.na(aic_values)] <- Inf  # Replace NA with Inf
+bic_values[is.na(bic_values)] <- Inf  # Replace NA with Inf
+view(aic_values)
+# Identify optimal lags
+optimal_lags_aic <- which(aic_values == min(aic_values, na.rm = TRUE), arr.ind = TRUE)
+optimal_lags_bic <- which(bic_values == min(bic_values, na.rm = TRUE), arr.ind = TRUE)
+```
+
+We have the AIC's results model: 
+
+```{r}
+generate_ARDL_formula <- function(lags_matrix, variable_names) {
+  # Format names: Add backticks if they contain spaces
+  formatted_names <- ifelse(grepl(" ", variable_names), paste0("`", variable_names, "`"), variable_names)
+  # Create lag terms for each variable
+  terms <- sapply(1:ncol(lags_matrix), function(i) {
+    paste(sprintf("lag(%s, %d)", formatted_names[i], 1:lags_matrix[1, i]), collapse = " + ")
+  })
+  # Construct and return the formula
+  paste("diff_annual_growth_rate ~", paste(terms, collapse = " + "))
+}
+
+# Usage
+variable_names <- names(data)
+
+# Generate and fit the ARDL model - AIC 
+ARDL_formula <- generate_ARDL_formula(optimal_lags_aic, variable_names)
+ARDL_model_AIC <- dynlm(as.formula(ARDL_formula), data = data)
+
+# Generate and fit the ARDL model - BIC
+ARDL_formula <- generate_ARDL_formula(optimal_lags_bic, variable_names)
+ARDL_model_BIC <- dynlm(as.formula(ARDL_formula), data = data)
+options(scipen = 999)
+BIC(ARDL_model_AIC)
+
+summary(ARDL_model_AIC)
+summary(ARDL_model_BIC)
+```
+
+We see that BIC's results are far superior compare to that of AIC. Thus, we move forward with BIC's model. We now check for model's multicolinearity by using VIF. 
+
+```{r}
+ARDL_formula
+# manually write down the regression
+ARDL_model_BIC <- dynlm(diff_annual_growth_rate ~ lag(diff_annual_growth_rate, 1) + lag(diff_annual_growth_rate, 2) + lag(diff_sex_ratio, 1) + lag(diff_sex_ratio, 2) + lag(diff_sex_ratio, 3) + lag(diff_sex_ratio, 4) + lag(TFR, 1) + lag(TFR, 2) + lag(TFR, 3) + lag(TFR, 4) + lag(TFR, 5) + lag(`Net Migration Rate`, 1) + lag(`Net Migration Rate`, 2) + lag(hdi, 1) + lag(hdi, 2) + lag(hdi, 3) + lag(hdi, 4) + lag(gdi, 1) + lag(diff_gii, 1) + lag(diff_gii, 2), data = data)
+
+# innitial results
+summary(ARDL_model_BIC)
+
+# current vif value 
+vif(ARDL_model_BIC)
+```
+
+The final model of VIF selection process: 
+
+```{r}
+# model at end of VIF selection
+ARDL_model_BIC <- dynlm(diff_annual_growth_rate ~ lag(diff_annual_growth_rate, 1) + lag(diff_annual_growth_rate, 2) + lag(diff_sex_ratio, 1) + lag(diff_sex_ratio, 2) + lag(diff_sex_ratio, 3) + lag(diff_sex_ratio, 4) + lag(TFR, 1) + lag(`Net Migration Rate`, 1) + lag(`Net Migration Rate`, 2) + lag(hdi, 1) + lag(gdi, 1) + lag(diff_gii, 1) + lag(diff_gii, 2), data = data)
+
+# results
+summary(ARDL_model_BIC)
+
+# current vif value 
+vif(ARDL_model_BIC)
+```
+
+Backward variable selection
+
+```{r}
+ARDL_model_BIC <- dynlm(diff_annual_growth_rate ~ lag(diff_annual_growth_rate, 1) + lag(diff_sex_ratio, 4) + lag(TFR, 1) + lag(`Net Migration Rate`, 1) + lag(hdi, 1) + lag(diff_gii, 1), data = data)
+
+# results
+summary(ARDL_model_BIC)
+
+vif(ARDL_model_BIC)
+```
 
